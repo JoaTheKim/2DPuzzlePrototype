@@ -3,6 +3,8 @@ using UnityEngine;
 
 public sealed class GridManager : MonoBehaviour
 {
+    private static Sprite sharedDefaultTileSprite;
+
     private static readonly Vector2Int[] CardinalDirections =
     {
         new Vector2Int(1, 0),
@@ -20,22 +22,22 @@ public sealed class GridManager : MonoBehaviour
 
     [SerializeField] private Color emptyColor = new Color(0.85f, 0.85f, 0.85f, 1.0f);
     [SerializeField] private Color wallColor = new Color(0.25f, 0.25f, 0.25f, 1.0f);
-    [SerializeField] private Color itemColor = Color.yellow;
+    [SerializeField] private Color itemColor = Color.white;
     [SerializeField] private Color ritualColor = new Color(1.0f, 0.55f, 0.0f, 1.0f);
     [SerializeField] private Color safeTileColor = new Color(0.15f, 0.7f, 0.3f, 1.0f);
+    [SerializeField] private bool fogEnabled = true;
 
+    private GameVisualConfiguration visualConfiguration;
+    private System.Random generationRandom;
     private TileType[,] tileTypes;
     private TileView[,] tileViews;
+    private FogState[,] fogStates;
 
     public int Width => width;
     public int Height => height;
     public int ItemCount => itemCount;
     public float TileSize => tileSize;
-
-    private void Awake()
-    {
-        GenerateGrid();
-    }
+    public bool IsFogEnabled => fogEnabled;
 
     public bool IsInsideGrid(Vector2Int gridPosition)
     {
@@ -44,7 +46,13 @@ public sealed class GridManager : MonoBehaviour
 
     public bool IsWalkableForPlayer(Vector2Int gridPosition)
     {
-        return IsInsideGrid(gridPosition) && tileTypes[gridPosition.x, gridPosition.y] != TileType.Wall;
+        if (!IsInsideGrid(gridPosition))
+        {
+            return false;
+        }
+
+        TileType tileType = tileTypes[gridPosition.x, gridPosition.y];
+        return tileType != TileType.Wall && tileType != TileType.Ritual;
     }
 
     public bool IsWalkableForGhost(Vector2Int gridPosition)
@@ -84,7 +92,7 @@ public sealed class GridManager : MonoBehaviour
         }
 
         tileTypes[gridPosition.x, gridPosition.y] = TileType.Empty;
-        tileViews[gridPosition.x, gridPosition.y].SetType(TileType.Empty, GetColorForType(TileType.Empty));
+        tileViews[gridPosition.x, gridPosition.y].SetType(TileType.Empty, GetColorForType(TileType.Empty), GetSpriteForType(TileType.Empty));
         return true;
     }
 
@@ -168,16 +176,103 @@ public sealed class GridManager : MonoBehaviour
         mainCamera.transform.position = new Vector3(0.0f, 0.0f, -10.0f);
     }
 
+    public void Initialize(GameVisualConfiguration configuration, int generationSeed)
+    {
+        visualConfiguration = configuration;
+        generationRandom = new System.Random(generationSeed);
+        GenerateGrid();
+    }
+
+    public List<Vector2Int> GetTilesInRadius(Vector2Int center, int radius)
+    {
+        List<Vector2Int> tiles = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                Vector2Int position = new Vector2Int(x, y);
+                int distance = Mathf.Abs(position.x - center.x) + Mathf.Abs(position.y - center.y);
+                if (distance <= radius)
+                {
+                    tiles.Add(position);
+                }
+            }
+        }
+
+        return tiles;
+    }
+
+    public void UpdateFog(Vector2Int playerPosition, int visionRadius)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                if (fogStates[x, y] == FogState.Visible)
+                {
+                    fogStates[x, y] = FogState.Revealed;
+                }
+            }
+        }
+
+        List<Vector2Int> visibleTiles = GetTilesInRadius(playerPosition, visionRadius);
+        for (int index = 0; index < visibleTiles.Count; index++)
+        {
+            Vector2Int visibleTile = visibleTiles[index];
+            fogStates[visibleTile.x, visibleTile.y] = FogState.Visible;
+        }
+
+        RefreshFogVisuals();
+    }
+
+    public bool IsTileVisible(Vector2Int position)
+    {
+        return IsInsideGrid(position) && fogStates[position.x, position.y] == FogState.Visible;
+    }
+
+    public bool IsRitualTile(Vector2Int position)
+    {
+        return IsInsideGrid(position) && tileTypes[position.x, position.y] == TileType.Ritual;
+    }
+
+    public void SetFogEnabled(bool enabled)
+    {
+        fogEnabled = enabled;
+        RefreshFogVisuals();
+    }
+
+    public List<Vector2Int> GetValidAdjacentActionTiles(Vector2Int from)
+    {
+        List<Vector2Int> positions = new List<Vector2Int>();
+        for (int index = 0; index < CardinalDirections.Length; index++)
+        {
+            Vector2Int next = from + CardinalDirections[index];
+            if (!IsInsideGrid(next))
+            {
+                continue;
+            }
+
+            if (IsWalkableForPlayer(next) || IsRitualTile(next))
+            {
+                positions.Add(next);
+            }
+        }
+
+        return positions;
+    }
+
     private void GenerateGrid()
     {
         tileTypes = new TileType[width, height];
         tileViews = new TileView[width, height];
+        fogStates = new FogState[width, height];
 
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
             {
                 tileTypes[x, y] = TileType.Empty;
+                fogStates[x, y] = FogState.Hidden;
                 CreateTileView(new Vector2Int(x, y), TileType.Empty);
             }
         }
@@ -186,6 +281,7 @@ public sealed class GridManager : MonoBehaviour
         PlaceRandomTiles(TileType.Safe, safeTileCount, avoidEdges: false);
         PlaceRandomTiles(TileType.Item, itemCount, avoidEdges: true);
         PlaceRandomTiles(TileType.Ritual, 1, avoidEdges: true);
+        RefreshFogVisuals();
     }
 
     private void PlaceRandomTiles(TileType tileType, int count, bool avoidEdges)
@@ -197,8 +293,8 @@ public sealed class GridManager : MonoBehaviour
         while (placed < count && attempts < safetyLimit)
         {
             attempts++;
-            int x = Random.Range(0, width);
-            int y = Random.Range(0, height);
+            int x = generationRandom.Next(0, width);
+            int y = generationRandom.Next(0, height);
             Vector2Int position = new Vector2Int(x, y);
 
             if (avoidEdges && (x == 0 || y == 0 || x == width - 1 || y == height - 1))
@@ -212,7 +308,7 @@ public sealed class GridManager : MonoBehaviour
             }
 
             tileTypes[x, y] = tileType;
-            tileViews[x, y].SetType(tileType, GetColorForType(tileType));
+            tileViews[x, y].SetType(tileType, GetColorForType(tileType), GetSpriteForType(tileType));
             placed++;
         }
     }
@@ -237,7 +333,7 @@ public sealed class GridManager : MonoBehaviour
             return Vector2Int.zero;
         }
 
-        return candidates[Random.Range(0, candidates.Count)];
+        return candidates[generationRandom.Next(0, candidates.Count)];
     }
 
     private void CreateTileView(Vector2Int gridPosition, TileType tileType)
@@ -245,7 +341,7 @@ public sealed class GridManager : MonoBehaviour
         GameObject tileObject = new GameObject();
         tileObject.transform.SetParent(transform, false);
         TileView tileView = tileObject.AddComponent<TileView>();
-        tileView.Initialize(gridPosition, tileType, GetWorldPosition(gridPosition), tileSize, GetColorForType(tileType));
+        tileView.Initialize(gridPosition, tileType, GetWorldPosition(gridPosition), tileSize, GetColorForType(tileType), GetSpriteForType(tileType));
         tileViews[gridPosition.x, gridPosition.y] = tileView;
     }
 
@@ -274,6 +370,44 @@ public sealed class GridManager : MonoBehaviour
                 return safeTileColor;
             default:
                 return Color.magenta;
+        }
+    }
+
+    private Sprite GetSpriteForType(TileType tileType)
+    {
+        if (tileType == TileType.Item && visualConfiguration != null && visualConfiguration.ItemSprite != null)
+        {
+            return visualConfiguration.ItemSprite;
+        }
+
+        return GetDefaultTileSprite();
+    }
+
+    private static Sprite GetDefaultTileSprite()
+    {
+        if (sharedDefaultTileSprite != null)
+        {
+            return sharedDefaultTileSprite;
+        }
+
+        Texture2D texture = Texture2D.whiteTexture;
+        sharedDefaultTileSprite = Sprite.Create(texture, new Rect(0.0f, 0.0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), texture.width);
+        return sharedDefaultTileSprite;
+    }
+
+    private void RefreshFogVisuals()
+    {
+        if (tileViews == null)
+        {
+            return;
+        }
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                tileViews[x, y].SetFogState(fogStates[x, y], fogEnabled);
+            }
         }
     }
 }
