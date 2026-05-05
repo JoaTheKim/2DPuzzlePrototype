@@ -14,6 +14,10 @@ public sealed class GameManager : MonoBehaviour
     private const int ESCALATED_CHASE_RADIUS = 3;
     private const int GHOST_STUN_TURNS_AFTER_SACRIFICE = 2;
     private const int STICKY_AGGRO_BONUS_MOVE_INTERVAL = 3;
+    private static readonly Vector2 ACTION_BUTTONS_GAMEPLAY_GENERATE_ANCHOR = new Vector2(0.88f, 0.92f);
+    private static readonly Vector2 ACTION_BUTTONS_GAMEPLAY_RESTART_ANCHOR = new Vector2(0.88f, 0.74f);
+    private static readonly Vector2 ACTION_BUTTONS_CENTER_GENERATE_ANCHOR = new Vector2(0.5f, 0.56f);
+    private static readonly Vector2 ACTION_BUTTONS_CENTER_RESTART_ANCHOR = new Vector2(0.5f, 0.46f);
     private static readonly Color GHOST_COUNTER_DEFAULT_COLOR = Color.white;
     private static readonly Color GHOST_COUNTER_WARNING_COLOR = Color.red;
     private static int? nextGridSeed;
@@ -39,6 +43,8 @@ public sealed class GameManager : MonoBehaviour
     private Text ghostStunnedText;
     private Button generateNewButton;
     private Button restartButton;
+    private RectTransform generateNewButtonRectTransform;
+    private RectTransform restartButtonRectTransform;
     private Image jumpscareFlashImage;
 
     private bool isGameFinished;
@@ -47,6 +53,7 @@ public sealed class GameManager : MonoBehaviour
     private int currentGridSeed;
     private int currentChaseRadius;
     private int pendingGhostStunTurns;
+    private bool hasProcessedFirstTurn;
     private bool hasTriggeredJumpscare;
     private static bool hasRegisteredSceneLoadedCallback;
 
@@ -153,10 +160,12 @@ public sealed class GameManager : MonoBehaviour
         progressText = CreateText("ProgressText", canvas.transform, new Vector2(0.5f, 0.82f), 26, string.Empty);
         ghostActionText = CreateText("GhostActionText", canvas.transform, new Vector2(0.5f, 0.75f), 24, string.Empty);
         ghostStunnedText = CreateText("GhostStunnedText", canvas.transform, new Vector2(0.5f, 0.69f), 24, string.Empty);
-        generateNewButton = CreateActionButton("GenerateNewButton", "Generate New", canvas.transform, new Vector2(0.5f, 0.24f), GenerateNewScene);
-        restartButton = CreateActionButton("RestartButton", "Restart", canvas.transform, new Vector2(0.5f, 0.14f), RestartScene);
-        restartButton.gameObject.SetActive(false);
-        generateNewButton.gameObject.SetActive(false);
+        generateNewButton = CreateActionButton("GenerateNewButton", "Generate New", canvas.transform, ACTION_BUTTONS_GAMEPLAY_GENERATE_ANCHOR, GenerateNewScene);
+        restartButton = CreateActionButton("RestartButton", "Restart", canvas.transform, ACTION_BUTTONS_GAMEPLAY_RESTART_ANCHOR, RestartScene);
+        generateNewButtonRectTransform = generateNewButton.GetComponent<RectTransform>();
+        restartButtonRectTransform = restartButton.GetComponent<RectTransform>();
+        generateNewButton.gameObject.SetActive(true);
+        restartButton.gameObject.SetActive(true);
     }
 
     private static void EnsureEventSystemExists()
@@ -179,6 +188,7 @@ public sealed class GameManager : MonoBehaviour
         gridManager.SetFogEnabled(debugFogEnabled);
 
         Vector2Int playerStartPosition = gridManager.GetRandomWalkablePositionForPlayer();
+        playerStartPosition = gridManager.EnsurePlayablePlayerStart(playerStartPosition);
         playerController.SetInitialPosition(playerStartPosition, gridManager.GetWorldPosition(playerStartPosition), gridManager.TileSize);
 
         Vector2Int ghostStartPosition = gridManager.GetRandomWalkablePositionForGhost();
@@ -189,10 +199,12 @@ public sealed class GameManager : MonoBehaviour
         ghostController.SetInitialPosition(ghostStartPosition, gridManager.GetWorldPosition(ghostStartPosition), gridManager.TileSize);
 
         UpdateFogAndGhostVisibility();
+        ghostController.SetVisible(false);
         gridManager.FrameMainCamera();
         RefreshProgressText();
         UpdateGhostDoubleTurnCounterUi();
         UpdateGhostStunnedUi();
+        UpdateActionButtonsLayout(isCentered: false);
         RefreshMoveHighlights();
     }
 
@@ -253,6 +265,7 @@ public sealed class GameManager : MonoBehaviour
 
     private void ResolveTurn()
     {
+        hasProcessedFirstTurn = true;
         turnCount++;
         UpdateFogAndGhostVisibility();
         ghostController.UpdateState(playerController.GridPosition, playerController.HasItem, currentChaseRadius);
@@ -294,8 +307,7 @@ public sealed class GameManager : MonoBehaviour
     {
         isGameFinished = true;
         stateText.text = textValue;
-        restartButton.gameObject.SetActive(true);
-        generateNewButton.gameObject.SetActive(true);
+        UpdateActionButtonsLayout(isCentered: true);
         gridManager.ClearHighlights();
     }
 
@@ -410,6 +422,11 @@ public sealed class GameManager : MonoBehaviour
 
         gridManager.UpdateFog(playerController.GridPosition, visionRadius);
         bool ghostVisible = gridManager.IsTileVisible(ghostController.GridPosition) || !gridManager.IsFogEnabled;
+        if (!hasProcessedFirstTurn)
+        {
+            ghostVisible = false;
+        }
+
         ghostController.SetVisible(ghostVisible);
 
         if (ghostVisible && !hasTriggeredJumpscare)
@@ -527,5 +544,24 @@ public sealed class GameManager : MonoBehaviour
         ghostStunnedText.gameObject.SetActive(true);
         ghostStunnedText.color = GHOST_COUNTER_WARNING_COLOR;
         ghostStunnedText.text = $"Ghost stunned for {stunnedTurns} turns";
+    }
+
+    private void UpdateActionButtonsLayout(bool isCentered)
+    {
+        if (generateNewButtonRectTransform == null || restartButtonRectTransform == null)
+        {
+            return;
+        }
+
+        Vector2 generateAnchor = isCentered ? ACTION_BUTTONS_CENTER_GENERATE_ANCHOR : ACTION_BUTTONS_GAMEPLAY_GENERATE_ANCHOR;
+        Vector2 restartAnchor = isCentered ? ACTION_BUTTONS_CENTER_RESTART_ANCHOR : ACTION_BUTTONS_GAMEPLAY_RESTART_ANCHOR;
+
+        generateNewButtonRectTransform.anchorMin = generateAnchor;
+        generateNewButtonRectTransform.anchorMax = generateAnchor;
+        generateNewButtonRectTransform.anchoredPosition = Vector2.zero;
+
+        restartButtonRectTransform.anchorMin = restartAnchor;
+        restartButtonRectTransform.anchorMax = restartAnchor;
+        restartButtonRectTransform.anchoredPosition = Vector2.zero;
     }
 }

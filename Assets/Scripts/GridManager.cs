@@ -101,7 +101,6 @@ public sealed class GridManager : MonoBehaviour
         return GetRandomPosition(
             position =>
                 tileTypes[position.x, position.y] == TileType.Empty ||
-                tileTypes[position.x, position.y] == TileType.Ritual ||
                 tileTypes[position.x, position.y] == TileType.Safe);
     }
 
@@ -259,6 +258,32 @@ public sealed class GridManager : MonoBehaviour
         }
 
         return positions;
+    }
+
+    public Vector2Int EnsurePlayablePlayerStart(Vector2Int startPosition)
+    {
+        if (GetValidAdjacentTilesForPlayer(startPosition).Count > 0)
+        {
+            return startPosition;
+        }
+
+        for (int index = 0; index < CardinalDirections.Length; index++)
+        {
+            Vector2Int candidate = startPosition + CardinalDirections[index];
+            if (!IsInsideGrid(candidate))
+            {
+                continue;
+            }
+
+            if (tileTypes[candidate.x, candidate.y] == TileType.Wall)
+            {
+                tileTypes[candidate.x, candidate.y] = TileType.Empty;
+                tileViews[candidate.x, candidate.y].SetType(TileType.Empty, GetColorForType(TileType.Empty), GetSpriteForType(TileType.Empty));
+                return startPosition;
+            }
+        }
+
+        return startPosition;
     }
 
     private void GenerateGrid()

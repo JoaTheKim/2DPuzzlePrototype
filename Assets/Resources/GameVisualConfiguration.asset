@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: be8abc51cd4cf39408ce73779fe60cd7, type: 3}
   m_Name: GameVisualConfiguration
   m_EditorClassIdentifier: 
-  playerSprite: {fileID: 0}
-  ghostSprite: {fileID: 0}
-  itemSprite: {fileID: 0}
+  playerSprite: {fileID: -7755309065512783179, guid: 58d322a3a5cddc842a347ac18f64b842, type: 3}
+  ghostSprite: {fileID: -5899927303015767666, guid: c58e0aa40db5d1e4f90558bd067127ac, type: 3}
+  itemSprite: {fileID: -5231366205957992080, guid: 1f497d9f524808d42b11e8776221bf74, type: 3}
